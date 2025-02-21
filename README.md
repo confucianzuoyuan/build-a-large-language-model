@@ -54,7 +54,7 @@
 
 ## 有关代码
 
-为了方便读者跟随学习，本书中的所有代码示例都可以在Manning网站上找到，网址为https://www.manning.com/books/build-a-large-language-model-from-scratch，同时也可以在GitHub上以Jupyter笔记本格式获取，网址为https://github.com/rasbt/LLMs-from-scratch。不用担心遇到困难——所有代码练习的解答都可以在附录C中找到。
+为了方便读者跟随学习，本书中的所有代码示例都可以在Manning网站上找到，网址为[链接](https://www.manning.com/books/build-a-large-language-model-from-scratch)，同时也可以在GitHub上以Jupyter笔记本格式获取，网址为[链接](https://github.com/rasbt/LLMs-from-scratch)。不用担心遇到困难——所有代码练习的解答都可以在附录C中找到。
 
 本书包含了许多源代码示例，既有编号的代码清单，也有与正文混合的代码片段。在这两种情况下，源代码都以固定宽度的字体显示，以便与普通文本区分开来。
 
@@ -66,7 +66,7 @@
 
 ## liveBook讨论论坛
 
-购买《从零开始构建大语言模型》一书将免费获得访问liveBook的权限，liveBook是Manning的在线阅读平台。通过liveBook的独家讨论功能，你可以在全局范围内或针对特定章节或段落附加评论。你可以轻松地为自己做笔记、提出并回答技术问题，并从作者和其他用户那里获得帮助。要访问论坛，请前往 https://livebook.manning.com/book/build-a-large-language-model-from-scratch/discussion。你还可以在 https://livebook.manning.com/discussion 了解更多关于Manning论坛及其行为准则的信息。
+购买《从零开始构建大语言模型》一书将免费获得访问liveBook的权限，liveBook是Manning的在线阅读平台。通过liveBook的独家讨论功能，你可以在全局范围内或针对特定章节或段落附加评论。你可以轻松地为自己做笔记、提出并回答技术问题，并从作者和其他用户那里获得帮助。要访问论坛，请前往[链接](https://livebook.manning.com/book/build-a-large-language-model-from-scratch/discussion)。你还可以在[链接](https://livebook.manning.com/discussion)了解更多关于Manning论坛及其行为准则的信息。
 
 Manning对读者的承诺是提供一个平台，让个别读者之间以及读者与作者之间能够进行有意义的对话。这并不代表作者会承诺任何特定的参与程度，作者对论坛的贡献仍然是自愿的（且无报酬的）。我们建议你尝试向作者提出一些具有挑战性的问题，以免他的兴趣分散！只要本书仍在印刷中，论坛和以往讨论的存档都可以从出版商的网站上访问。
 
