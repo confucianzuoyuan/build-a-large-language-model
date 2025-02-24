@@ -566,11 +566,388 @@ KeyError: 'Hello'
 
 ![](figures/21.svg)
 
+现在，让我们修改词汇表，以包含这两个特殊标记： `<unk>`和`<|endoftext|>`，将它们添加到我们的所有唯一单词列表中：
+
+```py
+all_tokens = sorted(list(set(preprocessed)))
+all_tokens.extend(["<|endoftext|>", "<|unk|>"])
+vocab = {token:integer for integer,token in enumerate(all_tokens)}
+
+print(len(vocab.items()))
+```
+
+根据此打印语句的输出，新的词汇量为 1,132（之前的词汇量为 1,130）。
+
+```py
+for i, item in enumerate(list(vocab.items())[-5:]):
+    print(item)
+```
+
+代码打印
+
+```py
+('younger', 1127)
+('your', 1128)
+('yourself', 1129)
+('<|endoftext|>', 1130)
+('<|unk|>', 1131)
+```
+
+根据代码输出，我们可以确认这两个新的特殊标记确实已成功加入词汇表中。接下来，我们相应地调整代码清单 2.3 中的分词器，如下列清单所示。
+
+> [!NOTE]
+> **代码清单 2.4** 一个处理未知单词的简单文本分词器
+> ```py
+> class SimpleTokenizerV2:
+>     def __init__(self, vocab):
+>         self.str_to_int = vocab
+>         self.int_to_str = { i:s for s,i in vocab.items()}
+> 
+>     def encode(self, text):
+>         preprocessed = re.split(r'([,.:;?_!"()\']|--|\s)', text)
+>         preprocessed = [
+>             item.strip() for item in preprocessed if item.strip()
+>         ]
+>         # 将未知单词替换为`<|unk|>`
+>         preprocessed = [item if item in self.str_to_int
+>                         else "<|unk|>" for item in preprocessed]
+>         ids = [self.str_to_int[s] for s in preprocessed]
+>         return ids
+> 
+>     def decode(self, ids):
+>         text = " ".join([self.int_to_str[i] for i in ids])
+>         # 替换掉特殊分隔符之前的空格
+>         text = re.sub(r'\s+([,.:;?!"()\'])', r'\1', text)
+>         return text
+> ```
+
+与我们清单 2.3 中实现的 SimpleTokenizerV1 相比，新的 SimpleTokenizerV2 将未知词替换为<|unk|>标记。
+
+现在让我们在实践中尝试这个新的分词器。为此，我们将使用一个简单的文本样本，该样本由两个独立且不相关的句子连接而成：
+
+```py
+text1 = "Hello, do you like tea?"
+text2 = "In the sunlit terraces of the palace."
+text = " <|endoftext|> ".join((text1, text2))
+print(text)
+```
+
+输出为
+
+```
+Hello, do you like tea? <|endoftext|> In the sunlit terraces of
+the palace.
+```
+
+接下来，我们使用 SimpleTokenizerV2 对之前在第 2.2 节创建的词汇表进行样本文本的分词：
+
+```py
+tokenizer = SimpleTokenizerV2(vocab)
+print(tokenizer.encode(text))
+```
+
+这将打印以下token ID：
+
+```py
+[1131, 5, 355, 1126, 628, 975, 10, 1130, 55, 988, 956, 984, 722, 988, 1131, 7]
+```
+
+我们可以看到，token ID 列表包含用于 <|endoftext|> 分隔符的 1130，以及用于未知词的两个 1131。
+
+让我们对文本进行去标记化以快速进行健全性检查：
+
+```py
+print(tokenizer.decode(tokenizer.encode(text)))
+```
+
+输出为
+
+```
+<|unk|>, do you like tea? <|endoftext|> In the sunlit terraces of
+the <|unk|>.
+```
+
+通过将这段去标记化文本与原始输入文本进行比较，我们了解到训练数据集，即伊迪丝·华顿的短篇小说《判决》，不包含“Hello”和“palace”这两个词。
+
+根据LLM，一些研究者还考虑了如下的额外特殊标记：
+
+- [BOS] (beginning of sequence)--此标记表示文本的开始。它向LLM指示一段内容的起始位置。
+- [EOS] (end of sequence)--此标记位于文本末尾，在连接多个不相关的文本时特别有用，类似于<|endoftext|>。例如，在合并两篇不同的维基百科文章或书籍时，[EOS]标记指示一个文本的结束和下一个文本的开始。
+- [PAD] (padding)--当以大于一的批量大小训练LLMs时，批量中可能包含长度不一的文本。为确保所有文本长度相同，较短的文本会使用[PAD]标记进行扩展或“填充”，直至达到批量中最长文本的长度。
+
+用于 GPT 模型的分词器不需要这些标记；为简化起见，它仅使用`<|endoftext|>`标记。`<|endoftext|>`类似于`[EOS]`标记。`<|endoftext|>`也用于填充。然而，正如我们将在后续章节中探讨的那样，在对批量输入进行训练时，我们通常使用掩码，意味着我们不会关注填充的标记。因此，选择用于填充的特定标记变得无关紧要。
+
+此外，用于 GPT 模型的分词器也不使用`<|unk|>`标记来表示词汇表外的单词。相反，GPT 模型采用字节对编码分词器，将单词分解为子词单元，我们接下来将讨论这一点。
+
 ## 2.5 字节对编码（Byte pair encoding）
 
+让我们来看一个基于字节对编码（BPE）概念的更复杂的分词方案。BPE 分词器被用于训练诸如 GPT-2、GPT-3 以及 ChatGPT 中使用的原始模型LLM。
+
+由于实现 BPE 可能相对复杂，我们将使用一个名为 [tiktoken](https://github.com/openai/tiktoken) 的现有 Python 开源库，它基于 Rust 源代码非常高效地实现了 BPE 算法。与其他 Python 库类似，我们可以通过终端使用 Python 的 pip 安装程序安装 tiktoken 库：
+
+```sh
+pip install tiktoken
+```
+
+我们将使用的代码基于 tiktoken 0.7.0。你可以使用以下代码检查当前安装的版本：
+
+```py
+from importlib.metadata import version
+import tiktoken
+print("tiktoken version:", version("tiktoken"))
+```
+
+安装完成后，我们可以按如下方式从 tiktoken 实例化 BPE 分词器：
+
+```py
+tokenizer = tiktoken.get_encoding("gpt2")
+```
+
+该分词器的使用方式类似于我们之前通过 encode 方法实现的 SimpleTokenizerV2：
+
+```py
+text = (
+"Hello, do you like tea? <|endoftext|> In the sunlit terraces"
+"of someunknownPlace."
+)
+integers = tokenizer.encode(text, allowed_special={"<|endoftext|>"})
+print(integers)
+```
+
+代码打印以下 token ID：
+
+```py
+[15496, 11, 466, 345, 588, 8887, 30, 220, 50256, 554, 262, 4252, 18250,
+8812, 2114, 286, 617, 34680, 27271, 13]
+```
+
+然后我们可以使用 decode 方法将 token ID 转换回文本，类似于 `SimpleTokenizerV2`:
+
+```py
+strings = tokenizer.decode(integers)
+print(strings)
+```
+
+代码会打印
+
+```
+Hello, do you like tea? <|endoftext|> In the sunlit terraces of
+someunknownPlace.
+```
+
+根据 token ID 和解码后的文本，我们可以得出两个值得注意的观察结果。首先，`<|endoftext|>` token 被分配了一个相对较大的 token ID，即 50256。实际上，用于训练 GPT-2、GPT-3 以及 ChatGPT 原始模型的 BPE tokenizer，其总词汇量为 50,257，而`<|endoftext|>`被赋予了最大的 token ID。
+
+其次，BPE 分词器能够正确编码和解码未知词汇，例如 someunknownPlace。BPE 分词器能够处理任何未知词汇。它如何在不使用`<|unk|>`标记的情况下实现这一点？
+
+BPE 算法将不在其预定义词汇表中的单词分解为更小的子词单元甚至单个字符，从而使其能够处理词汇表外的单词。因此，得益于 BPE 算法，如果分词器在分词过程中遇到不熟悉的单词，它可以将其表示为子词标记或字符的序列，如图 2.11 所示。
+
+![](figures/22.svg)
+
+将未知词汇分解为单个字符的能力确保了分词器以及随之训练的LLM能够处理任何文本，即使其中包含未出现在其训练数据中的词汇。
+
+> [!TIP]
+> 练习 2.1 未知词的字节对编码
+> 尝试使用 tiktoken 库中的 BPE 分词器对未知单词“Akwirw ier”进行分词，并打印各个 token ID。然后，对此列表中的每个整数调用解码函数，以重现图 2.11 中所示的映射。最后，对 token ID 调用解码方法，检查其是否能够重建原始输入“Akwirw ier”。
+
+BPE 的详细讨论和实现超出了本书的范围，但简而言之，它通过迭代地将频繁出现的字符合并为子词，再将频繁出现的子词合并为单词来构建其词汇表。例如，BPE 首先将所有单个字符添加到其词汇表中（“a”、“b”等）。在下一阶段，它将频繁一起出现的字符组合合并为子词。例如，“d”和“e”可能被合并为子词“de”，这在许多英语中很常见。de 单词如“define”、“depend”、“made”和“hidden”。合并由频率截止值决定。
+
 ## 2.6 使用滑动窗口对数据进行采样
+
+创建LLM嵌入的下一步是生成训练LLM所需的输入-目标对。这些输入-目标对是什么样的？正如我们已经了解到的，LLMs通过预测文本中的下一个单词进行预训练，如图 2.12 所示。
+
+![](figures/23.svg)
+
+让我们实现一个数据加载器，使用滑动窗口方法从训练数据集中获取图 2.12 中的输入-目标对。首先，我们将使用 BPE 分词器对整个《判决》短篇故事进行分词：
+
+```py
+with open("the-verdict.txt", "r", encoding="utf-8") as f:
+    raw_text = f.read()
+
+enc_text = tokenizer.encode(raw_text)
+print(len(enc_text))
+```
+
+执行此代码将返回 5145，这是在应用 BPE 分词器后训练集中 token 的总数。
+
+接下来，为了演示目的，我们从数据集中移除前 50 个标记，因为这样可以在后续步骤中得到稍微更有趣的文本段落：
+
+```py
+enc_sample = enc_text[50:]
+```
+
+为下一个词预测任务创建输入-目标对的最简单直观方法之一是创建两个变量 x 和 y，其中 x 包含输入标记，y 包含目标，即输入向后移动 1 位的结果：
+
+```py
+context_size = 4
+x = enc_sample[:context_size]
+y = enc_sample[1:context_size+1]
+print(f"x: {x}")
+print(f"y:     {y}")
+```
+
+运行前面的代码会打印以下输出：
+
+```
+x: [290, 4920, 2241, 287]
+y:      [4920, 2241, 287, 257]
+```
+
+通过处理输入以及目标（即输入向后移动一个位置的结果），我们可以创建下一词预测任务（见图 2.12），如下所示：
+
+```py
+for i in range(1, context_size+1):
+    context = enc_sample[:i]
+    desired = enc_sample[i]
+    print(context, "---->", desired)
+```
+
+代码打印
+
+```
+[290] ----> 4920
+[290, 4920] ----> 2241
+[290, 4920, 2241] ----> 287
+[290, 4920, 2241, 287] ----> 257
+```
+
+箭头左侧 (`---->`) 的所有内容指的是 LLM 会接收的输入，箭头右侧的 token ID 表示 LLM 应该预测的目标 token ID。让我们重复之前的代码，但将 token ID 转换为文本：
+
+```py
+for i in range(1, context_size+1):
+    context = enc_sample[:i]
+    desired = enc_sample[i]
+    print(tokenizer.decode(context), "---->", tokenizer.decode([desired]))
+```
+
+以下输出展示了输入和输出在文本格式中的呈现方式：
+
+```
+and ----> established
+and established ----> himself
+and established himself ----> in
+and established himself in ----> a
+```
+
+我们现在已经创建了可以用于LLM训练的输入-目标对。
+
+在我们将词元转换为嵌入之前，还有一项任务：实现一个高效的数据加载器，它能遍历输入数据集并返回结果输入和目标作为 PyTorch 张量，可以视为多维数组。特别地，我们关注的是返回两个张量：一个包含LLM看到的文本的输入张量，以及一个包含LLM预测目标的目标张量，如图 2.13 所示。虽然图中以字符串格式展示标记以作说明，但代码实现将直接操作标记 ID，因为 BPE 分词器的编码方法将分词和转换为标记 ID 作为一步完成。
+
+![](figures/24.svg)
+
+> [!NOTE]
+> 注意 为了实现高效的数据加载器，我们将使用 PyTorch 内置的 Dataset 和 DataLoader 类。有关安装 PyTorc 的更多信息和指导，请参阅附录 A 中的 A.2.1.3 节。
+
+数据集类的代码如以下列表所示。
+
+> [!NOTE]
+> **代码清单 2.5** 批量输入和目标的数据集
+```py
+import torch
+from torch.utils.data import Dataset, DataLoader
+class GPTDatasetV1(Dataset):
+    def __init__(self, txt, tokenizer, max_length, stride):
+        self.input_ids = []
+        self.target_ids = []
+        # 将整个文本进行分词
+        token_ids = tokenizer.encode(txt)
+
+        # 使用滑动窗口将书分块为重叠的序列，序列长度为`max_length`
+        for i in range(0, len(token_ids) - max_length, stride):
+            input_chunk = token_ids[i:i + max_length]
+            target_chunk = token_ids[i + 1: i + max_length + 1]
+            self.input_ids.append(torch.tensor(input_chunk))
+            self.target_ids.append(torch.tensor(target_chunk))
+
+    # 返回数据集的行数量
+    def __len__(self):
+        return len(self.input_ids)
+
+    # 返回数据集中的某一行
+    def __getitem__(self, idx):
+        return self.input_ids[idx], self.target_ids[idx]
+```
+
+GPTDatasetV1 类基于 PyTorch 的 Dataset 类，定义了如何从数据集中获取单行数据，其中每行由分配给 input_chunk 张量的多个 token ID（基于 max_length）组成。target_chunk tensor 包含相应的目标。我建议继续阅读，以了解当我们将此数据集与 PyTorch 的 DataLoader 结合时，返回的数据是什么样子的——这将带来额外的直观理解和清晰度。
+
+> [!NOTE]
+> 如果你对 PyTorch Dataset 类的结构不熟悉，比如代码清单 2.5 中所示的情况，请参考附录 A 中的 A.6 节，该节解释了 PyTorch Dataset 和 DataLoader 类的一般结构和用法。
+
+以下代码使用 GPTDatasetV1 通过 PyTorch 批量加载输入DataLoader。
+
+```py
+def create_dataloader_v1(txt, batch_size=4, max_length=256,
+                         stride=128, shuffle=True, drop_last=True,
+                         num_workers=0):
+    # 初始化分词器
+    tokenizer = tiktoken.get_encoding("gpt2")
+    # 创建数据集
+    dataset = GPTDatasetV1(txt, tokenizer, max_length, stride)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        # drop_last=True 在最后一个批次小于指定的 batch_size 时将其丢弃，以防止训练期间出现损失峰值。
+        drop_last=drop_last,
+        # 用于预处理的 CPU 进程数量
+        num_workers=num_workers
+    )
+
+    return dataloader
+```
+
+
+让我们用批大小为 1 的LLM和上下文大小为 4 来测试数据加载器，以直观了解清单 2.5 中的 GPTDatasetV1 类和 create_dataloader_v1 来自 listing 2.6 的函数协同工作：
+
+```py
+with open("the-verdict.txt", "r", encoding="utf-8") as f:
+    raw_text = f.read()
+
+dataloader = create_dataloader_v1(
+    raw_text, batch_size=1, max_length=4, stride=1, shuffle=False)
+
+# 将 dataloader 转换为 Python 迭代器，以便通过 Python 内置的 next()函数获取下一个条目
+data_iter = iter(dataloader)
+first_batch = next(data_iter)
+print(first_batch)
+```
+
+执行前面的代码将输出以下内容：
+
+```py
+[tensor([[40, 367, 2885, 1464]]), tensor([[367, 2885, 1464, 1807]])]
+```
+
+first_batch 变量包含两个张量：第一个张量存储输入token ID，第二个张量存储目标token ID。由于 max_length 设置为 4，两个张量各包含四个token ID。请注意，输入大小为 4 是非常小的，仅为了简化而选择。通常使用至少 256 的输入大小来训练 LLM。
+
+要理解 stride=1 的含义，让我们从这个数据集中再取一个批次：
+
+```py
+second_batch = next(data_iter)
+print(second_batch)
+```
+
+第二批内容包括：
+
+```py
+[tensor([[367, 2885, 1464, 1807]]), tensor([[2885, 1464, 1807, 3619]])]
+```
+
+如果我们比较第一批和第二批，可以看到第二批的 token ID 位置偏移了一位（例如，第一批输入中的第二个 ID 是 367，它在第二批输入中变成了第一个 ID）。stride 设置决定了输入在批次间移动的位置数量，模拟了滑动窗口的方法，如图 2.14 所示。
+
+> [!TIP]
+> 练习 2.2 具有不同步幅和上下文大小的数据加载器
+> 为了更直观地理解数据加载器的工作原理，尝试使用不同的设置来运行它设置如 max_length=2 和 stride=2，以及 max_length=8 和 stride=2。
+
+
 
 ## 2.7 创建token的嵌入
 
 ## 总结
 
+- LLM 需要将文本数据转换为数值向量，即所谓的嵌入，因为它们无法处理原始文本。嵌入将离散数据（如单词或图像）转换为连续向量空间，使其与神经网络操作兼容。
+- 作为第一步，原始文本被分解为标记，这些标记可以是单词或字符。然后，将 token 转换为整数表示，称为 token ID。
+- 特殊标记，如`<|unk|>`和`<|endoftext|>`，可以添加到模型中，以增强其理解能力并处理各种上下文，例如未知词汇或标记不相关文本之间的边界。
+- 用于 GPT-2 和 GPT-3 等模型的字节对编码（BPE）分词器能够通过将未知词分解为子词单元或单个字符来高效处理它们。
+- 我们在分词数据上使用滑动窗口方法来生成训练用的输入-目标对。
+- PyTorch 中的嵌入层作为查找操作，检索与 token ID 对应的向量。生成的嵌入向量提供了 token 的连续表示，这对于训练深度学习模型至关重要。
+- 虽然 token 嵌入为每个 token 提供了一致的向量表示，但它们缺乏 token 在序列中的位置感。为了解决这个问题，存在两种主要类型的位置嵌入：绝对位置嵌入和相对位置嵌入。OpenAI 的 GPT 模型使用绝对位置嵌入，这些嵌入被添加到 token 嵌入向量中，并在模型训练期间进行优化。
