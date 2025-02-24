@@ -323,3 +323,11 @@ urllib.request.urlretrieve(url, file_path)
 
 接下来，我们可以使用 Python 的标准文件读取工具加载 the-verdict.txt 文件。
 
+> [!NOTE]
+> 代码清单 2.1 将短篇小说作为文本样本读入 Python
+> ```py
+> with open("the-verdict.txt", "r", encoding="utf-8") as f:
+>     raw_text = f.read()
+> print("Total number of character:", len(raw_text))
+> print(raw_text[:99])
+> ```
