@@ -408,3 +408,28 @@ print(result)
 
 正如我们基于图 2.5 总结的结果所见，我们的分词方案现在能够成功处理文本中的各种特殊字符。
 
+
+
+既然我们有了一个基础的分词器，就让我们将其应用于伊迪丝·沃顿的整个短篇小说吧：
+
+```py
+preprocessed = re.split(r'([,.:;?_!"()\']|--|\s)', raw_text)
+preprocessed = [item.strip() for item in preprocessed if item.strip()]
+print(len(preprocessed))
+```
+
+此打印语句输出 4690，即此文本中的 token 数量（不含空格）。让我们打印前 30 个 token 以便快速视觉检查：
+
+```py
+print(preprocessed[:30])
+```
+
+结果表明，我们的分词器似乎很好地处理了文本，因为所有单词和特殊字符都被整齐地分开了：
+
+```py
+['I', 'HAD', 'always', 'thought', 'Jack', 'Gisburn', 'rather', 'a',
+'cheap', 'genius', '--', 'though', 'a', 'good', 'fellow', 'enough',
+'--', 'so', 'it', 'was', 'no', 'great', 'surprise', 'to', 'me', 'to',
+'hear', 'that', ',', 'in']
+```
+
