@@ -1512,6 +1512,275 @@ Previous 2nd context vector: tensor([0.4419, 0.6515, 0.5683])
 
 ## 3.4 实现带可训练权重的自注意力
 
+我们的下一步将是实现原始 Transformer 架构、GPT 模型及大多数其他流行LLMs中所使用的自注意力机制。该自注意力机制亦称为缩放点积注意力。图 3.13 展示了这一自注意力机制如何融入实现LLM的更大框架之中。
+
+![](figures/43.svg)
+
+如图 3.13 所示，具有可训练权重的自注意力机制建立在之前的概念之上：我们希望计算特定于某个输入元素的上下文向量作为输入向量的加权和。正如你将看到的，与我们之前编写的基本自注意力机制相比，只有细微的差别。
+
+最显著的差异是引入了在模型训练期间更新的权重矩阵。这些可训练的权重矩阵至关重要，以便模型（特别是模型内部的注意力模块）能够学会生成“良好”的上下文向量。（我们将在第 5 章中训练LLM。）
+
+我们将在两个小节中探讨这种自注意力机制。首先，我们将像以前一样逐步编写代码。其次，我们将把代码组织成一个紧凑的 Python 类，可以导入到LLM架构中。
+
+### 3.4.1 逐步计算注意力权重
+
+我们将通过引入三个可训练的权重矩阵 $W_q$、$W_k$ 和 $W_v$，逐步实现自注意力机制。这三个矩阵分别用于将嵌入的输入标记 $x^{(i)}$ 投影为查询向量、键向量和值向量，如图 3.14 所示。
+
+![](figures/44.svg)
+
+早些时候，在计算简化注意力权重以得出上下文向量 $z^{(2)}$ 时，我们将第二个输入元素 $x^{(2)}$ 定义为查询。随后，我们将此方法推广，针对六词输入句“Your journey starts with one step.”计算了所有上下文向量 $z^{(1)} \dots z^{(T)}$ 。
+
+同样，为了说明目的，我们在这里仅计算一个上下文向量 z。随后，我们将修改此代码以计算所有上下文向量。
+
+让我们先定义几个变量：
+
+```py
+# 第二个输入元素
+x_2 = inputs[1]
+# 输入的嵌入大小，d = 3
+d_in = inputs.shape[1]
+# 输出的嵌入大小，d_out = 2
+d_out = 2
+```
+
+请注意，在类似 GPT 的模型中，输入和输出维度通常是相同的，但为了更好地理解计算过程，这里我们将使用不同的输入（d_in=3）和输出（d_out=2）维度。
+
+接下来，我们初始化图 3.14 中所示的三个权重矩阵 $W_q$、$W_k$ 和 $W_v$：
+
+```py
+torch.manual_seed(123)
+W_query = torch.nn.Parameter(torch.rand(d_in, d_out), requires_grad=False)
+W_key   = torch.nn.Parameter(torch.rand(d_in, d_out), requires_grad=False)
+W_value = torch.nn.Parameter(torch.rand(d_in, d_out), requires_grad=False)
+```
+
+我们将 requires_grad 设置为 False 以减少输出中的杂乱信息，但如果我们要使用权重矩阵进行模型训练，我们会将 requires_grad 设置为 True，以便在模型训练期间更新这些矩阵。
+
+接下来，我们计算查询、键和值向量：
+
+```py
+query_2 = x_2 @ W_query
+key_2 = x_2 @ W_key
+value_2 = x_2 @ W_value
+print(query_2)
+```
+
+查询的输出结果是一个二维向量，因为我们通过 d_out 将对应权重矩阵的列数设置为 2：
+
+```py
+tensor([0.4306, 1.4551])
+```
+
+> [!NOTE]
+> 权重参数 vs. 注意力权重
+> 在权重矩阵 W 中，“权重”一词是“权重参数”的简称，指的是神经网络在训练过程中被优化的值。这不应与注意力权重混淆。正如我们之前所见，注意力权重决定了上下文向量对输入不同部分的依赖程度（即网络在多大程度上关注输入的不同部分）。
+>
+> 总之，权重参数是定义网络连接的基本、学习到的系数，而注意力权重是动态的、特定于上下文的值。
+
+尽管我们的临时目标仅是计算一个上下文向量 $z^{(2)}$，我们仍然需要所有输入元素的键和值向量，因为它们参与了与查询 $q^{(2)}$ 相关的注意力权重计算（见图 3.14）。
+
+我们可以通过矩阵乘法获取所有键和值：
+
+```py
+keys = inputs @ W_key
+values = inputs @ W_value
+print("keys.shape:", keys.shape)
+print("values.shape:", values.shape)
+```
+
+从输出中可以看出，我们成功地将六个三维输入令牌投影到了二维嵌入空间中：
+
+```py
+keys.shape: torch.Size([6, 2])
+values.shape: torch.Size([6, 2])
+```
+
+第二步是计算注意力分数，如图 3.15 所示。
+
+![](figures/45.svg)
+
+首先，我们计算注意力分数 $\omega_{22}$：
+
+```py
+# 记住！Python的索引是从 0 开始的！
+keys_2 = keys[1]
+attn_score_22 = query_2.dot(keys_2)
+print(attn_score_22)
+```
+
+未归一化注意力得分的结果是
+
+```py
+tensor(1.8524)
+```
+
+再次，我们可以通过矩阵乘法将这一计算推广到所有注意力得分：
+
+```py
+# 给定查询的所有注意力分数
+attn_scores_2 = query_2 @ keys.T
+print(attn_scores_2)
+```
+
+正如我们所见，作为快速检查，输出中的第二个元素与我们之前计算的 attn_score_22 相匹配：
+
+```py
+tensor([1.2705, 1.8524, 1.8111, 1.0795, 0.5577, 1.5440])
+```
+
+现在，我们想从注意力分数转换到注意力权重，如图 3.16 所示。我们通过缩放注意力分数并使用 softmax 函数来计算注意力权重。然而，现在我们通过将注意力分数除以键的嵌入维度的平方根来缩放它们（取平方根在数学上等同于将其乘以 0.5 的指数）：
+
+```py
+d_k = keys.shape[-1]
+attn_weights_2 = torch.softmax(attn_scores_2 / d_k**0.5, dim=-1)
+print(attn_weights_2)
+```
+
+生成的注意力权重是
+
+```py
+tensor([0.1500, 0.2264, 0.2199, 0.1311, 0.0906, 0.1820])
+```
+
+> [!NOTE]
+> 缩放点积注意力背后的原理
+> 归一化处理嵌入维度大小的原因在于通过避免小梯度来提升训练性能。例如，在放大嵌入维度（对于类似 GPT 的模型LLMs，通常超过 1,000）时，由于应用于它们的 softmax 函数，大的点积可能导致反向传播过程中梯度变得非常小。随着点积增大，softmax 函数的行为更趋近于阶跃函数，导致梯度接近零。这些小梯度可能大幅减缓学习速度或使训练陷入停滞。
+>
+> 嵌入维度平方根的缩放是这种自注意力机制也被称为缩放点积注意力的原因。
+
+现在，最后一步是计算上下文向量，如图 3.17 所示。
+
+类似于我们通过输入向量的加权和计算上下文向量时（见第 3.3 节），我们现在通过价值向量的加权和来计算上下文向量。在这里，注意力权重作为加权因子发挥作用。
+
+这里每个值向量的各自重要性。同样如前所述，我们可以使用矩阵乘法一步得到输出：
+
+```py
+context_vec_2 = attn_weights_2 @ values
+print(context_vec_2)
+```
+
+结果向量的内容如下：
+
+```py
+tensor([0.3061, 0.8210])
+```
+
+到目前为止，我们只计算了一个单一的上下文向量 $z^{(2)}$。接下来，我们将把代码泛化为计算输入序列中所有的上下文向量，从 $z^{(1)}$ 到 $z^{(T)}$ 。
+
+> [!NOTE]
+> **为什么是查询、键和值？**
+> 在注意力机制的语境下，“key”、“query”和“value”这些术语借鉴自信息检索和数据库领域，其中类似的概念被用于存储、搜索和检索信息。
+>
+> 查询类似于数据库中的搜索查询。它表示模型当前关注或试图理解的项目（例如，句子中的一个词或标记）。查询用于探测输入序列的其他部分，以确定对它们应给予多少注意力。
+>
+> 键类似于用于索引和搜索的数据库键。在注意力机制中，输入序列中的每个项（例如，句子中的每个单词）都有一个关联的键。这些键用于匹配查询。
+>
+> 在此上下文中的值类似于数据库中的键值对中的值。它表示输入项目的实际内容或表示形式。一旦模型确定哪些键（以及输入的哪些部分）与查询（当前焦点项目）最相关，它就会检索相应的值。
+
+### 3.4.2 实现一个紧凑的自注意力 Python 类
+
+至此，我们已经历了许多步骤来计算自注意力输出。我们这样做主要是为了演示目的，以便能够一步步地进行。实际上，考虑到下一章中的LLM实现，将这段代码组织成一个 Python 类是有帮助的，如下列代码所示。
+
+> [!NOTE]
+> **代码清单 3.1** 一个紧凑的自注意力的类
+> ```py
+> import torch.nn as nn
+> class SelfAttention_v1(nn.Module):
+>     def __init__(self, d_in, d_out):
+>         super().__init__()
+>         self.W_query = nn.Parameter(torch.rand(d_in, d_out))
+>         self.W_key   = nn.Parameter(torch.rand(d_in, d_out))
+>         self.W_value = nn.Parameter(torch.rand(d_in, d_out))
+> 
+>     def forward(self, x):
+>         keys = x @ self.W_key
+>         queries = x @ self.W_query
+>         values = x @ self.W_value
+>         attn_scores = queries @ keys.T # omega
+>         attn_weights = torch.softmax(
+>             attn_scores / keys.shape[-1]**0.5, dim=-1
+>         )
+>         context_vec = attn_weights @ values
+>         return context_vec
+> ```
+
+在这段 PyTorch 代码中，SelfAttention_v1 是一个继承自 nn.Module 的类，它是 PyTorch 模型的基础构建块，提供了模型层创建和管理所需的功能。
+
+`__init__` 方法初始化了可训练的权重矩阵（`W_query`、`W_key` 和 `W_value`），分别用于查询、键和值，每个矩阵将输入维度 `d_in` 转换为输出维度 `d_out`。
+
+在前向传播过程中，我们使用 forward 方法，通过将查询与键相乘来计算注意力分数（attn_scores），并使用 softmax 对这些分数进行归一化。最后，我们通过用这些归一化后的注意力分数对值进行加权，生成上下文向量。
+
+我们可以按如下方式使用这个类：
+
+```py
+torch.manual_seed(123)
+sa_v1 = SelfAttention_v1(d_in, d_out)
+print(sa_v1(inputs))
+```
+
+由于输入包含六个嵌入向量，因此结果是一个存储六个上下文向量的矩阵：
+
+```py
+tensor([[0.2996, 0.8053],
+        [0.3061, 0.8210],
+        [0.3058, 0.8203],
+        [0.2948, 0.7939],
+        [0.2927, 0.7891],
+        [0.2990, 0.8040]], grad_fn=<MmBackward0>)
+```
+
+作为一种快速检查，请注意第二行（[0.3061, 0.8210]）与上一节中 context_vec_2 的内容相匹配。图 3.18 总结了我们刚刚实现的自注意力机制。
+
+自注意力机制涉及可训练的权重矩阵 W、W 和 W。这些矩阵将输入数据分别转换为查询、键和值，它们是注意力机制的关键组成部分。随着模型在训练过程中接触更多数据，它将调整这些可训练的权重，我们将在后续章节中看到这一点。
+
+我们可以通过利用 PyTorch 的 nn.Linear 层进一步改进 SelfAttention_v1 的实现，当偏置单元被禁用时，这些层能有效地执行矩阵乘法。此外，使用 nn.Linear 的一个显著优势是相较于手动实现`nn.Parameter(torch.rand(...))`，`nn.Linear`拥有一个优化的权重初始化方案，有助于实现更稳定、更有效的模型训练。
+
+> [!NOTE]
+> **代码清单 3.2** 一个使用 PyTorch 的 Linear 层的自注意力类
+```py
+class SelfAttention_v2(nn.Module):
+    def __init__(self, d_in, d_out, qkv_bias=False):
+        super().__init__()
+        self.W_query = nn.Linear(d_in, d_out, bias=qkv_bias)
+        self.W_key   = nn.Linear(d_in, d_out, bias=qkv_bias)
+        self.W_value = nn.Linear(d_in, d_out, bias=qkv_bias)
+
+    def forward(self, x):
+        keys = self.W_key(x)
+        queries = self.W_query(x)
+        values = self.W_value(x)
+        attn_scores = queries @ keys.T
+        attn_weights = torch.softmax(
+            attn_scores / keys.shape[-1]**0.5, dim=-1
+        )
+        context_vec = attn_weights @ values
+        return context_vec
+```
+
+你可以使用类似于 SelfAttention_v1 的 SelfAttention_v2：
+
+```py
+torch.manual_seed(789)
+sa_v2 = SelfAttention_v2(d_in, d_out)
+print(sa_v2(inputs))
+```
+
+输出是
+
+```py
+tensor([[-0.0739, 0.0713],
+        [-0.0748, 0.0703],
+        [-0.0749, 0.0702],
+        [-0.0760, 0.0685],
+        [-0.0763, 0.0679],
+        [-0.0754, 0.0693]], grad_fn=<MmBackward0>)
+```
+
+请注意，SelfAttention_v1 和 SelfAttention_v2 会给出不同的输出，因为它们为权重矩阵使用了不同的初始权重，这是由于 nn.Linear 采用了更复杂的权重初始化方案。
+
+
+
+
 
 
 ## 3.5 使用因果注意力机制来隐藏未来的单词
